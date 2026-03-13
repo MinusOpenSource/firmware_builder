@@ -30,6 +30,35 @@ die()  { err "$*"; exit 1; }
 
 ensure_dir() { mkdir -p "$@"; }
 
+run_task() {
+    local project="$1"
+    local task_name="$2"
+    local log_file="$3"
+    shift 3
+    
+    local start_seconds=$SECONDS
+
+    echo ""
+    
+    "$@" 2>&1 | {
+        while IFS= read -r line; do
+            echo "$line" >> "$log_file"
+            local elapsed=$((SECONDS - start_seconds))
+            local m=$((elapsed / 60))
+            local s=$((elapsed % 60))
+
+            printf "\r\033[K%s\n" "$line"
+
+            printf "\033[1;36m[ %02d:%02d ] [ %s ] %s\033[0m" "$m" "$s" "$project" "$task_name"
+        done
+        printf "\r\033[K"
+    }
+
+    return ${PIPESTATUS[0]}
+}
+
+export -f msg warn err die ensure_dir run_task
+
 check_toolchain() {
     if ! command -v "${CROSS_COMPILE}gcc" >/dev/null 2>&1; then
         warn "Cross compiler '${CROSS_COMPILE}gcc' not found in PATH."
