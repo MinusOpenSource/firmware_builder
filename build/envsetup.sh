@@ -49,23 +49,25 @@ done
 lunch() {
     local target=$1
 
+    local configs=()
+    for f in $(find "${DEVICE_DIR}" -type f -name "*.mk" 2>/dev/null); do
+        configs+=("$(basename "$f" .mk)")
+    done
+
     if [ -z "$target" ]; then
-        msg "You're building on $(uname -s)"
-        msg "Lunch menu... pick a combo:"
-        select target in $LUNCH_MENU_CHOICES; do
+        msg "Lunch menu... pick a board:"
+        select target in "${configs[@]}"; do
             [ -n "$target" ] && break
         done
     fi
 
-    export TARGET_PRODUCT=$(echo "$target" | cut -d'-' -f1)
-    export TARGET_BUILD_VARIANT=$(echo "$target" | cut -d'-' -f2)
-
-    local product_config=$(find "${DEVICE_DIR}" -name "${TARGET_PRODUCT}.mk" 2>/dev/null | head -n 1)
+    local product_config=$(find "${DEVICE_DIR}" -name "${target}.mk" 2>/dev/null | head -n 1)
     if [ -z "$product_config" ]; then
         err "Product spec not found for: '$target'"
         return 1
     fi
 
+    export TARGET_PRODUCT="$target"
     source "$product_config"
 
     export TARGET_OUT_DIR="${OUT_DIR}/target/product/${TARGET_PRODUCT}"
@@ -81,7 +83,6 @@ lunch() {
     cat <<EOF
 ============================================
 TARGET_PRODUCT=$TARGET_PRODUCT
-TARGET_BUILD_VARIANT=$TARGET_BUILD_VARIANT
 TARGET_OUT_DIR=$TARGET_OUT_DIR
 ARCH=$ARCH
 CROSS_COMPILE=$CROSS_COMPILE
