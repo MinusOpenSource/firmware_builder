@@ -21,7 +21,7 @@ UBOOT_DEFCONFIG="w3-rk3588_defconfig"
 # Kernel
 KERNEL_IMPL="mainline"
 KERNEL_BASE_DEFCONFIG="defconfig"
-KERNEL_CONFIG_FRAGMENT="${DEVICE_DIR}/armsom/w3/kernel.config"
+KERNEL_CONFIG_FRAGMENT="${DEVICE_DIR}/armsom/w3/armsom_w3-kernel.config"
 KERNEL_IMAGE_NAME="Image"
 KERNEL_DTB="rockchip/rk3588-armsom-w3.dtb"
 
