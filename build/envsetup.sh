@@ -42,7 +42,7 @@ add_lunch_combo() {
     export LUNCH_MENU_CHOICES="${LUNCH_MENU_CHOICES} $1"
 }
 
-for f in $(find "${DEVICE_DIR}" -name "vendorsetup.sh" 2>/dev/null); do
+for f in $(find "${DEVICE_DIR}" -name "*.sh" 2>/dev/null); do
     source "$f"
 done
 
