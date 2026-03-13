@@ -68,7 +68,9 @@ lunch() {
     fi
 
     export TARGET_PRODUCT="$target"
+    set -a
     source "$product_config"
+    set +a
 
     export TARGET_OUT_DIR="${OUT_DIR}/target/product/${TARGET_PRODUCT}"
     export KERNEL_OUT="${TARGET_OUT_DIR}/obj/kernel"
