@@ -17,6 +17,9 @@ TARGET_ARCH="arm64"
 BOOTLOADER="u-boot"
 UBOOT_IMPL="mainline"
 UBOOT_DEFCONFIG="w3-rk3588_defconfig"
+RKBIN := vendor/rockchip/rkbin
+RK_TPL_BIN  := ${RKBIN}/bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin
+RK_BL31_ELF := ${RKBIN}/bin/rk35/rk3588_bl31_v1.51.elf
 
 # Kernel
 KERNEL_IMPL="mainline"
