@@ -45,7 +45,7 @@ run_task "KERNEL" "build image & dtbs" "${KERNEL_BUILD_LOG}" \
     make -j"${JOBS}" O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" "${KERNEL_IMAGE_NAME}" modules dtbs
 
 run_task "KERNEL" "install modules" "${KERNEL_BUILD_LOG}" \
-    make O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" INSTALL_MOD_PATH="${ROOTFS_OUT}" INSTALL_MOD_STRIP=1 modules_install
+    make O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" INSTALL_MOD_PATH="${BOOT_OUT}" INSTALL_MOD_STRIP=1 modules_install
 
 if [ ! -f "${IMAGE_PATH}" ]; then
     die "Kernel image not found: ${IMAGE_PATH}"
@@ -67,8 +67,8 @@ fi
 DTB_BASENAME=$(basename "${KERNEL_DTB}")
 cat <<EOF > "${BOOT_OUT}/extlinux/extlinux.conf"
 label ${SUITE} (${KERNEL_IMPL} kernel)
-    kernel /${KERNEL_IMAGE_NAME}
-    fdt /${DTB_BASENAME}
+    kernel /boot/${KERNEL_IMAGE_NAME}
+    fdt /boot/${DTB_BASENAME}
     append ${KERNEL_CMDLINE}
 EOF
 

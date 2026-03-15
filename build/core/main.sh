@@ -28,7 +28,7 @@ START_TIME=$(date +%s)
 case "${MAKECMDGOALS}" in
     loader)
         echo "[100%] Building loader (U-Boot & rkbin)..."
-        # bash "${BUILD_DIR}/core/build_loader.sh"
+        bash "${BUILD_DIR}/core/build_loader.sh"
         ;;
     kernel)
         echo "[100%] Building kernel and dtbs..."
@@ -36,11 +36,11 @@ case "${MAKECMDGOALS}" in
         ;;
     rootfs)
         echo "[100%] Building rootfs (Ubuntu Base)..."
-        # bash "${BUILD_DIR}/core/build_rootfs.sh"
+        bash "${BUILD_DIR}/core/build_rootfs.sh"
         ;;
     image)
         echo "[100%] Building final raw image..."
-        # bash "${BUILD_DIR}/core/build_image.sh"
+        bash "${BUILD_DIR}/core/build_image.sh"
         ;;
     all)
         $0 loader

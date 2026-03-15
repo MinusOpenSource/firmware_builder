@@ -107,8 +107,9 @@ lunch() {
     export BOOT_OUT="${TARGET_OUT_DIR}/boot"
     export ROOTFS_OUT="${TARGET_OUT_DIR}/rootfs"
     export IMAGE_OUT="${TARGET_OUT_DIR}/image"
+    export LOADER_OUT="${TARGET_OUT_DIR}/loader"
 
-    ensure_dir "${KERNEL_OUT}" "${UBOOT_OUT}" "${BOOT_OUT}" "${ROOTFS_OUT}" "${IMAGE_OUT}"
+    ensure_dir "${KERNEL_OUT}" "${UBOOT_OUT}" "${BOOT_OUT}" "${ROOTFS_OUT}" "${IMAGE_OUT}" "${LOADER_OUT}"
     check_toolchain
 
     cat <<EOF

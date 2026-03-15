@@ -17,9 +17,9 @@ TARGET_ARCH="arm64"
 BOOTLOADER="u-boot"
 UBOOT_IMPL="mainline"
 UBOOT_DEFCONFIG="w3-rk3588_defconfig"
-RKBIN := vendor/rockchip/rkbin
-RK_TPL_BIN  := ${RKBIN}/bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin
-RK_BL31_ELF := ${RKBIN}/bin/rk35/rk3588_bl31_v1.51.elf
+RKBIN="vendor/rockchip/rkbin"
+RK_TPL_BIN="${RKBIN}/bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2400MHz_v1.19.bin"
+RK_BL31_ELF="${RKBIN}/bin/rk35/rk3588_bl31_v1.51.elf"
 
 # Kernel
 KERNEL_IMPL="mainline"
@@ -31,7 +31,7 @@ KERNEL_DTB="rockchip/rk3588-armsom-w3.dtb"
 # Kernel Command Line
 SERIAL_CONSOLE="ttyS2,1500000n8"
 EARLYCON="uart8250,mmio32,0xfeb50000"
-ROOTFS_PARTUUID="b921b045-1d" 
+ROOTFS_PARTUUID="d4e8c5a2-9f1b-47e3-a6b1-38c7f9d2e4a5"
 KERNEL_CMDLINE_BASE="rootwait rw splash quiet loglevel=4"
 KERNEL_CMDLINE_DEBUG="console=${SERIAL_CONSOLE} earlycon=${EARLYCON}"
 KERNEL_CMDLINE_ROOT="root=PARTUUID=${ROOTFS_PARTUUID}"
@@ -54,3 +54,7 @@ ROOTFS_PART_START_MIB="544"
 
 ROCKCHIP_IDBLOADER_SECTOR="64"
 ROCKCHIP_UBOOT_ITB_SECTOR="16384"
+
+# ROOTFS
+ROOTFS_VERSION := "26.04"
+ROOTFS_ARCH := TARGET_ARCH
