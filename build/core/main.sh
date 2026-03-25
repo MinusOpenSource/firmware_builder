@@ -40,7 +40,7 @@ case "${MAKECMDGOALS}" in
         ;;
     image)
         echo "[100%] Building final raw image..."
-        # bash "${BUILD_DIR}/core/build_image.sh"
+        bash "${BUILD_DIR}/core/build_image.sh"
         ;;
     all)
         $0 loader
