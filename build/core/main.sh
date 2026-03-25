@@ -28,7 +28,7 @@ START_TIME=$(date +%s)
 case "${MAKECMDGOALS}" in
     loader)
         echo "[100%] Building loader (U-Boot & rkbin)..."
-        # bash "${BUILD_DIR}/core/build_loader.sh"
+        bash "${BUILD_DIR}/core/build_loader.sh"
         ;;
     kernel)
         echo "[100%] Building kernel and dtbs..."
