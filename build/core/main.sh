@@ -36,7 +36,7 @@ case "${MAKECMDGOALS}" in
         ;;
     rootfs)
         echo "[100%] Building rootfs (Ubuntu Base)..."
-        # bash "${BUILD_DIR}/core/build_rootfs.sh"
+        bash "${BUILD_DIR}/core/build_rootfs.sh"
         ;;
     image)
         echo "[100%] Building final raw image..."
