@@ -1,0 +1,36 @@
+Source: platform-meta
+Section: metapackages
+Priority: optional
+Maintainer: Minus <minus_rav@qq.com>
+Standards-Version: 4.6.2
+Build-Depends: debhelper-compat (= 13)
+Rules-Requires-Root: no
+Vcs-Browser: https://github.com/SkyMinus
+Vcs-Git: https://github.com/SkyMinus
+
+Package: platform-kubuntu
+Architecture: arm64
+Depends:
+ kubuntu-desktop,
+ linux-firmware,
+ calamares,
+ calamares-settings-kubuntu
+Recommends:
+ curl,
+ git,
+ htop,
+ openssh-server,
+ lm-sensors,
+ bluez,
+ fake-hwclock,
+ usb-modeswitch,
+ usb-modeswitch-data,
+ wireless-regdb,
+ rfkill
+Description: Platform Kubuntu desktop system
+ This package depends on all of the packages required for the
+ Platform Kubuntu desktop environment, including the Calamares
+ installer.
+ .
+ It is also used to help ensure proper upgrades, so it is recommended
+ that it not be removed.
