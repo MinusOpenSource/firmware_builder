@@ -1,47 +1,229 @@
 #!/usr/bin/env bash
-set -e
+set -eE
+trap 'echo -e "\033[1;31m[ERR ]\033[0m Error in $0 on line $LINENO" >&2' ERR
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "\033[1;31m[ERR ]\033[0m Please run as root." >&2
+    exit 1
+fi
 
 if [ -z "${TARGET_PRODUCT}" ]; then
     echo -e "\033[1;31m[ERR ]\033[0m TARGET_PRODUCT is not set. Please run 'lunch' first." >&2
     exit 1
 fi
 
-: "${TARGET_DEVICE:?TARGET_DEVICE is not set}"
+# Initial base environment
 : "${TARGET_SUITE:?TARGET_SUITE is not set}"
-: "${TARGET_FLAVOR:?TARGET_FLAVOR is not set}"
-: "${ROOTFS_RELEASE:?ROOTFS_RELEASE is not set}"
-: "${ROOTFS_CODENAME:?ROOTFS_CODENAME is not set}"
-: "${ROOTFS_TYPE:?ROOTFS_TYPE is not set}"
-: "${ROOTFS_ARCH:?ROOTFS_ARCH is not set}"
+: "${ROOTFS_ARCH:=arm64}"
 : "${ROOTFS_BUILD_DIR:?ROOTFS_BUILD_DIR is not set}"
-: "${ROOTFS_ARTIFACT_DIR:?ROOTFS_ARTIFACT_DIR is not set}"
-: "${ROOTFS_BUILD_LOG:?ROOTFS_BUILD_LOG is not set}"
 : "${ROOTFS_TARBALL:?ROOTFS_TARBALL is not set}"
+: "${ROOTFS_CLEAN_BUILD:=true}"
+: "${ROOTFS_PORTS_MIRROR:=http://ports.ubuntu.com/ubuntu-ports}"
 : "${ROOTFS_LOCAL_DEB_DIR:=${ROOTFS_BUILD_DIR}/local-packages}"
+: "${KERNEL_PKG_OUT:?KERNEL_PKG_OUT is not set}"
+: "${KERNEL_OUT:?KERNEL_OUT is not set}"
+: "${KERNEL_DTB:?KERNEL_DTB is not set}"
 
-ensure_dir "${ROOTFS_BUILD_DIR}" "${ROOTFS_ARTIFACT_DIR}" "${ROOTFS_LOCAL_DEB_DIR}" "$(dirname "${ROOTFS_BUILD_LOG}")"
-
-msg "Building rootfs for ${TARGET_DEVICE}"
-msg "Suite             : ${TARGET_SUITE} (${ROOTFS_RELEASE}/${ROOTFS_CODENAME})"
-msg "Flavor            : ${TARGET_FLAVOR}"
-msg "Type              : ${ROOTFS_TYPE}"
-msg "Architecture      : ${ROOTFS_ARCH}"
-msg "Build dir         : ${ROOTFS_BUILD_DIR}"
-msg "Local package dir : ${ROOTFS_LOCAL_DEB_DIR}"
-msg "Artifact          : ${ROOTFS_TARBALL}"
-msg "Log file          : ${ROOTFS_BUILD_LOG}"
-
-> "${ROOTFS_BUILD_LOG}"
-
-if [ -n "${ROOTFS_LOCAL_PACKAGES:-}" ]; then
-    msg "Building local rootfs packages: ${ROOTFS_LOCAL_PACKAGES}"
-    run_task "ROOTFS" "local-packages" "${ROOTFS_BUILD_LOG}" \
-        bash "${BUILD_DIR}/packages/build_local_packages.sh" "${ROOTFS_LOCAL_DEB_DIR}" ${ROOTFS_LOCAL_PACKAGES}
-else
-    msg "No local rootfs packages requested"
+HOST_DPKG_ARCH="$(dpkg --print-architecture)"
+ROOTFS_CROSS_BUILD=false
+if [ "${HOST_DPKG_ARCH}" != "${ROOTFS_ARCH}" ]; then
+    ROOTFS_CROSS_BUILD=true
 fi
 
-run_task "ROOTFS" "livecd-rootfs" "${ROOTFS_BUILD_LOG}" \
-    bash "${BUILD_DIR}/rootfs/livecd-rootfs.sh"
+LIVECD_LB_DIR="${ROOTFS_BUILD_DIR}/live-build"
+if [ "${ROOTFS_CLEAN_BUILD}" = "true" ]; then
+    rm -rf "${LIVECD_LB_DIR}"
+else
+    echo -e "\033[1;32m[INFO]\033[0m Reusing existing live-build workspace: ${LIVECD_LB_DIR}"
+fi
+mkdir -p "${LIVECD_LB_DIR}" && cd "${LIVECD_LB_DIR}"
 
-msg "Rootfs build stage finished."
+echo -e "\033[1;32m[INFO]\033[0m Initializing live-build workspace..."
+
+# Track our own livecd_rootfs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIVECD_ROOTFS_ROOT=""
+LIVECD_ROOTFS_CANDIDATES=(
+    "$(cd "${SCRIPT_DIR}/../../.." && pwd)/livecd_rootfs"
+    "$(cd "${SCRIPT_DIR}/../.." && pwd)/livecd_rootfs"
+)
+
+for candidate in "${LIVECD_ROOTFS_CANDIDATES[@]}"; do
+    if [ -d "${candidate}/live-build/auto" ]; then
+        LIVECD_ROOTFS_ROOT="${candidate}"
+        break
+    fi
+done
+
+if [ -z "${LIVECD_ROOTFS_ROOT}" ]; then
+    echo -e "\033[1;31m[ERR ]\033[0m Cannot find workspace livecd_rootfs from ${SCRIPT_DIR}" >&2
+    exit 1
+fi
+
+rm -rf auto ubuntu-cpc
+cp -a "${LIVECD_ROOTFS_ROOT}/live-build/auto" .
+cp -a "${LIVECD_ROOTFS_ROOT}/live-build/ubuntu-cpc" .
+
+if [ "${ROOTFS_CROSS_BUILD}" = "true" ]; then
+    echo -e "\033[1;32m[INFO]\033[0m Cross-arch build detected (${HOST_DPKG_ARCH} -> ${ROOTFS_ARCH}); relaxing livecd-rootfs minimize-manual check."
+    sed -i 's#${LIVECD_ROOTFS_ROOT}/minimize-manual chroot#${LIVECD_ROOTFS_ROOT}/minimize-manual chroot || echo "W: minimize-manual did not converge under cross-arch build; continuing"#' auto/build
+fi
+
+# Prepare for auto config
+export LIVECD_ROOTFS_ROOT
+export PROJECT="ubuntu-cpc"
+export SUITE="${TARGET_SUITE}"
+export ARCH="${ROOTFS_ARCH}"
+export IMAGEFORMAT=none
+export NOW="$(date +%Y%m%d)"
+
+# Gen basic config
+lb config \
+    --architecture "${ROOTFS_ARCH}" \
+    --bootstrap-qemu-arch "${ROOTFS_ARCH}" \
+    --bootstrap-qemu-static /usr/bin/qemu-aarch64-static \
+    --archive-areas "main restricted universe multiverse" \
+    --parent-archive-areas "main restricted universe multiverse" \
+    --mirror-bootstrap "${ROOTFS_PORTS_MIRROR}" \
+    --parent-mirror-bootstrap "${ROOTFS_PORTS_MIRROR}" \
+    --mirror-chroot-security "${ROOTFS_PORTS_MIRROR}" \
+    --parent-mirror-chroot-security "${ROOTFS_PORTS_MIRROR}" \
+    --mirror-binary "${ROOTFS_PORTS_MIRROR}" \
+    --parent-mirror-binary "${ROOTFS_PORTS_MIRROR}" \
+    --mirror-binary-security "${ROOTFS_PORTS_MIRROR}" \
+    --parent-mirror-binary-security "${ROOTFS_PORTS_MIRROR}" \
+    --keyring-packages ubuntu-keyring \
+    --linux-packages none \
+    --binary-images none \
+    --bootappend-live ""
+
+rm -f config/hooks/*.binary*
+
+# Configure for packages
+mkdir -p config/package-lists
+cat > config/package-lists/my.list.chroot <<EOF
+iptables
+nftables
+ufw
+u-boot-menu
+EOF
+
+if [ -n "${ROOTFS_PACKAGE_LIST:-}" ]; then
+    for pkg in ${ROOTFS_PACKAGE_LIST}; do
+        echo "${pkg}" >> config/package-lists/my.list.chroot
+    done
+fi
+
+# Build and inject local custom DEB packages
+if [ -n "${ROOTFS_LOCAL_PACKAGES:-}" ]; then
+    echo -e "\033[1;32m[INFO]\033[0m Building local packages: ${ROOTFS_LOCAL_PACKAGES}..."
+    bash "${BUILD_DIR}/packages/build_local_packages.sh" \
+        "${ROOTFS_LOCAL_DEB_DIR}" ${ROOTFS_LOCAL_PACKAGES}
+fi
+
+echo -e "\033[1;32m[INFO]\033[0m Injecting local deb packages..."
+mkdir -p config/includes.chroot/opt/firmware-builder/packages
+if compgen -G "${ROOTFS_LOCAL_DEB_DIR}/*.deb" > /dev/null; then
+    cp -f "${ROOTFS_LOCAL_DEB_DIR}"/*.deb config/includes.chroot/opt/firmware-builder/packages/
+fi
+
+# Configure Hook
+mkdir -p config/hooks
+if [ "${ROOTFS_CROSS_BUILD}" = "true" ]; then
+    cat > config/hooks/005-disable-py3compile.chroot_early <<'EOF'
+#!/bin/sh
+set -e
+
+# Docker cross-builds execute foreign-arch binaries through the host kernel's
+# binfmt_misc handler, which can crash python3.14 during py3compile. Temporarily
+# stub the helpers so package configuration can complete under emulation.
+for tool in py3compile pypy3compile; do
+    if [ -x "/usr/bin/${tool}" ]; then
+        dpkg-divert --quiet --local --rename --add "/usr/bin/${tool}"
+        cat > "/usr/bin/${tool}" <<'EOS'
+#!/bin/sh
+exit 0
+EOS
+        chmod +x "/usr/bin/${tool}"
+    fi
+done
+EOF
+    chmod +x config/hooks/005-disable-py3compile.chroot_early
+
+    cat > config/hooks/999-restore-py3compile.chroot <<'EOF'
+#!/bin/sh
+set -e
+
+for tool in py3compile pypy3compile; do
+    if [ -e "/usr/bin/${tool}.distrib" ]; then
+        rm -f "/usr/bin/${tool}"
+        dpkg-divert --quiet --rename --remove "/usr/bin/${tool}"
+    fi
+done
+EOF
+    chmod +x config/hooks/999-restore-py3compile.chroot
+fi
+
+cat > config/hooks/010-install-local.chroot <<'EOF'
+#!/bin/sh
+set -e
+export DEBIAN_FRONTEND=noninteractive
+export G_SLICE=always-malloc
+export QEMU_CPU=max
+export NEEDRESTART_MODE=a
+
+echo "exit 101" > /usr/sbin/policy-rc.d
+chmod +x /usr/sbin/policy-rc.d
+
+mkdir -p /etc/needrestart/conf.d
+echo '$nrconf{restart} = "a";' > /etc/needrestart/conf.d/99-firmware-builder.conf
+
+if ls /opt/firmware-builder/packages/*.deb >/dev/null 2>&1; then
+    apt-get install -y /opt/firmware-builder/packages/*.deb
+fi
+
+rm -f /usr/sbin/policy-rc.d
+EOF
+chmod +x config/hooks/010-install-local.chroot
+
+# Build
+echo -e "\033[1;32m[INFO]\033[0m Starting rootfs build via live-build..."
+trap - ERR
+set +e
+lb build
+LB_BUILD_STATUS=$?
+set -eE
+trap 'echo -e "\033[1;31m[ERR ]\033[0m Error in $0 on line $LINENO" >&2' ERR
+if [ "${LB_BUILD_STATUS}" -ne 0 ]; then
+    echo -e "\033[1;31m[ERR ]\033[0m live-build failed with exit code ${LB_BUILD_STATUS}. See ${LIVECD_LB_DIR}/binary.log for details." >&2
+    exit "${LB_BUILD_STATUS}"
+fi
+
+# Cleanups
+chroot chroot /usr/bin/env -i \
+    HOME=/root TERM="${TERM:-linux}" \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    DEBIAN_FRONTEND=noninteractive \
+    /bin/bash -ec '
+echo "exit 101" > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d
+apt-get purge -y "^linux-image-.*" "^linux-modules-.*" || true
+apt-get purge -y "^grub-.*" || true
+apt-get autoremove -y --purge || true
+rm -rf /boot/grub
+apt-get clean
+rm -f /usr/sbin/policy-rc.d
+'
+
+ROOTFS_STAGING_DIR="chroot"
+
+# Packing rootfs tarball
+echo -e "\033[1;32m[INFO]\033[0m Packing rootfs tarball..."
+if mount | grep -q " $(realpath "${ROOTFS_STAGING_DIR}")/"; then
+    echo -e "\033[1;31m[ERR ]\033[0m Unsafe mounts detected in ${ROOTFS_STAGING_DIR}! Aborting pack." >&2
+    exit 1
+fi
+
+mkdir -p "$(dirname "${ROOTFS_TARBALL}")"
+(cd "${ROOTFS_STAGING_DIR}/" && tar -p -c --one-file-system --sort=name --xattrs .) | xz -3 -T0 > "${ROOTFS_TARBALL}"
+
+echo -e "\033[1;32m[INFO]\033[0m Build complete! Tarball generated: ${ROOTFS_TARBALL}"
