@@ -13,13 +13,25 @@ fi
 
 : "${UBOOT_DEFCONFIG:?UBOOT_DEFCONFIG is not set in mk file}"
 : "${UBOOT_SRC:?UBOOT_SRC is not set in envsetup}"
+: "${UBOOT_CLEAN_BUILD:=true}"
 
 LOG_OUT="${TARGET_OUT_DIR}/logs"
 UBOOT_BUILD_LOG="${LOG_OUT}/uboot_build.log"
 
 ensure_dir "${LOG_OUT}" "${UBOOT_OUT}" "${LOADER_OUT}"
 cd "${UBOOT_SRC}"
-rm -rf "${UBOOT_OUT:?}"/*
+
+case "${UBOOT_CLEAN_BUILD}" in
+    1|true|TRUE|yes|YES|y|Y)
+        rm -rf "${UBOOT_OUT:?}"/*
+        ;;
+    0|false|FALSE|no|NO|n|N)
+        msg "Skipping loader clean step"
+        ;;
+    *)
+        die "Invalid UBOOT_CLEAN_BUILD value: ${UBOOT_CLEAN_BUILD}"
+        ;;
+esac
 
 check_loader_build_tools
 check_loader_build_packages
