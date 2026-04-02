@@ -10,11 +10,18 @@ fi
 
 : "${TARGET_OUT_DIR:?TARGET_OUT_DIR is not set}"
 : "${IMAGE_OUT:?IMAGE_OUT is not set}"
+: "${LOADER_OUT:?LOADER_OUT is not set}"
 : "${ROOTFS_ARTIFACT_DIR:?ROOTFS_ARTIFACT_DIR is not set}"
 : "${ROOTFS_TARBALL:?ROOTFS_TARBALL is not set}"
+: "${BUILD_DIR:?BUILD_DIR is not set}"
+: "${KERNEL_PKG_OUT:?KERNEL_PKG_OUT is not set}"
+: "${KERNEL_DTB:?KERNEL_DTB is not set}"
+: "${KERNEL_CMDLINE:?KERNEL_CMDLINE is not set}"
 : "${ROOTFS_CODENAME:=resolute}"
 
 ensure_dir "${IMAGE_OUT}"
+
+POSTPROCESS_HELPER="${BUILD_DIR}/image/postprocess_rootfs.sh"
 
 IDBLOADER="${LOADER_OUT}/idbloader.img"
 UBOOT="${LOADER_OUT}/u-boot.itb"
@@ -108,6 +115,7 @@ require_host_command losetup util-linux
 require_host_command mount util-linux
 require_host_command tar tar
 require_host_command mkfs.ext4 e2fsprogs
+require_host_command qemu-aarch64-static qemu-user-static
 
 if [ ! -f "${UBOOT_ROCKCHIP_BIN}" ]; then
     for f in "$IDBLOADER" "$UBOOT"; do
@@ -124,6 +132,13 @@ if [ ! -f "${ROOTFS_TARBALL}" ]; then
     echo "Please ensure you have successfully run 'm rootfs'." >&2
     exit 1
 fi
+
+if [ ! -f "${POSTPROCESS_HELPER}" ]; then
+    echo -e "\033[1;31m[ERR ]\033[0m Missing helper: ${POSTPROCESS_HELPER}" >&2
+    exit 1
+fi
+
+source "${POSTPROCESS_HELPER}"
 
 if [ "$(id -u)" -ne 0 ]; then
     echo -e "\033[1;31m[ERR ]\033[0m Building the final image requires root privileges." >&2
@@ -167,19 +182,7 @@ echo " -> Extracting rootfs tarball..."
 tar --xattrs --xattrs-include='*' -xJpf "${ROOTFS_TARBALL}" -C "${mount_point}"
 
 echo " -> Configuring boot environment..."
-cat > "${mount_point}/etc/fstab" <<EOF
-UUID=${rootfs_uuid} / ext4 defaults,x-systemd.growfs 0 1
-EOF
-
-if [ -f "${mount_point}/etc/default/u-boot" ]; then
-    sed -i -E "s#^U_BOOT_ROOT=.*#U_BOOT_ROOT=\"root=UUID=${rootfs_uuid}\"#" "${mount_point}/etc/default/u-boot"
-fi
-
-if [ -f "${mount_point}/boot/extlinux/extlinux.conf" ]; then
-    sed -i -E "s/root=[^ ]+/root=UUID=${rootfs_uuid}/g" "${mount_point}/boot/extlinux/extlinux.conf"
-else
-    echo -e "\033[1;33m[WARN ]\033[0m /boot/extlinux/extlinux.conf not found. The system may not boot!" >&2
-fi
+apply_board_rootfs_customizations "${mount_point}" "${rootfs_uuid}"
 
 sync --file-system || true
 
