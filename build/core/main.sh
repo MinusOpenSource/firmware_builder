@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -e -o pipefail
 
 if [ -z "${TARGET_PRODUCT}" ]; then
     echo "build/core/main.sh: error: TARGET_PRODUCT is not set." >&2
@@ -34,7 +34,22 @@ clean_kernel_artifacts() {
 
 clean_rootfs_artifacts() {
     echo "Cleaning rootfs artifacts under ${ROOTFS_BUILD_DIR} and ${ROOTFS_ARTIFACT_DIR}"
+    local live_build_dir="${ROOTFS_BUILD_DIR}/live-build"
+    local germinate_dir="${live_build_dir}/config/germinate-output"
+    local germinate_tmp=""
+
+    if [ -d "${germinate_dir}" ]; then
+        germinate_tmp="$(mktemp -d /tmp/firmware-builder-germinate.XXXXXX)"
+        mv "${germinate_dir}" "${germinate_tmp}/"
+    fi
+
     rm -rf "${ROOTFS_BUILD_DIR}" "${ROOTFS_ARTIFACT_DIR}" "${ROOTFS_BUILD_LOG}" "${ROOTFS_TARBALL}"
+
+    if [ -n "${germinate_tmp}" ] && [ -d "${germinate_tmp}/germinate-output" ]; then
+        mkdir -p "${live_build_dir}/config"
+        mv "${germinate_tmp}/germinate-output" "${live_build_dir}/config/"
+        rmdir "${germinate_tmp}" 2>/dev/null || true
+    fi
 }
 
 clean_loader_artifacts() {
@@ -100,22 +115,22 @@ case "${MAKECMDGOALS}" in
         echo "[100%] Building rootfs..."
         case "${BUILD_VARIANT}" in
             "")
-                bash "${BUILD_DIR}/core/build_rootfs.sh"
+                ROOTFS_BACKEND=live-build bash "${BUILD_DIR}/core/build_rootfs.sh"
                 ;;
             clean)
                 clean_rootfs_artifacts
                 exit 0
                 ;;
-            rebuild)
-                clean_rootfs_artifacts
-                bash "${BUILD_DIR}/core/build_rootfs.sh"
+            base)
+                ROOTFS_BACKEND=base bash "${BUILD_DIR}/core/build_rootfs_base.sh"
                 ;;
-            noclean)
-                ROOTFS_CLEAN_BUILD=false bash "${BUILD_DIR}/core/build_rootfs.sh"
+            base-clean)
+                clean_rootfs_artifacts
+                exit 0
                 ;;
             *)
                 echo "Unknown rootfs build variant: '${BUILD_VARIANT}'" >&2
-                echo "Supported variants: clean, rebuild, noclean" >&2
+                echo "Supported variants: clean, base, base-clean" >&2
                 exit 1
                 ;;
         esac

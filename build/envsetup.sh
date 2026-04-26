@@ -30,7 +30,7 @@ export ROOTFS_TYPE=""
 export DESKTOP_ENV=""
 export ROOTFS_ARCH="${ARCH}"
 export ROOTFS_MIRROR=""
-export ROOTFS_PORTS_MIRROR="https://mirrors.ustc.edu.cn/ubuntu-ports"
+export ROOTFS_PORTS_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports"
 export ROOTFS_HOSTNAME=""
 export ROOTFS_USERNAME=""
 export ROOTFS_PASSWORD=""
@@ -39,6 +39,7 @@ export ROOTFS_TIMEZONE=""
 export ROOTFS_PACKAGE_LIST=""
 export ROOTFS_LOCAL_PACKAGES=""
 export ROOTFS_SEEDED_SNAPS=""
+export ROOTFS_BACKEND="${ROOTFS_BACKEND:-live-build}"
 export DEFAULT_SUITE=""
 export DEFAULT_FLAVOR=""
 export LIVECD_ROOTFS_SRC="${TOP_DIR}/livecd_rootfs"
@@ -64,34 +65,68 @@ die()  { err "$*"; exit 1; }
 
 ensure_dir() { mkdir -p "$@"; }
 
+show_log_tail() {
+    local log_file="$1"
+    local tail_lines="${2:-80}"
+
+    [ -s "${log_file}" ] || return 0
+
+    err "Showing the last ${tail_lines} lines from ${log_file}:"
+    tail -n "${tail_lines}" "${log_file}" >&2 || true
+}
+
 run_task() {
     local project="$1"
     local task_name="$2"
     local log_file="$3"
     shift 3
-    
+
     local start_seconds=$SECONDS
+    local elapsed
+    local minutes
+    local seconds
+    local rc
+    local tail_lines="${BUILD_LOG_TAIL_LINES:-80}"
+    local had_errexit=0
+    local had_pipefail=0
+
+    case $- in
+        *e*) had_errexit=1 ;;
+    esac
+    if set -o | grep -q '^pipefail[[:space:]]\+on$'; then
+        had_pipefail=1
+    fi
 
     echo ""
-    
-    "$@" 2>&1 | {
-        while IFS= read -r line; do
-            echo "$line" >> "$log_file"
-            local elapsed=$((SECONDS - start_seconds))
-            local m=$((elapsed / 60))
-            local s=$((elapsed % 60))
+    msg "[${project}] ${task_name}"
+    ensure_dir "$(dirname "${log_file}")"
+    : >> "${log_file}"
 
-            printf "\r\033[K%s\n" "$line"
+    set +e
+    set -o pipefail
+    "$@" 2>&1 | tee -a "${log_file}"
+    rc=${PIPESTATUS[0]}
+    if [ "${had_errexit}" -eq 1 ]; then
+        set -e
+    fi
+    if [ "${had_pipefail}" -eq 0 ]; then
+        set +o pipefail
+    fi
 
-            printf "\033[1;36m[ %02d:%02d ] [ %s ] %s\033[0m" "$m" "$s" "$project" "$task_name"
-        done
-        printf "\r\033[K"
-    }
+    elapsed=$((SECONDS - start_seconds))
+    minutes=$((elapsed / 60))
+    seconds=$((elapsed % 60))
 
-    return ${PIPESTATUS[0]}
+    if [ "${rc}" -ne 0 ]; then
+        err "[${project}] ${task_name} failed after ${minutes}m${seconds}s (exit ${rc}). Full log: ${log_file}"
+        show_log_tail "${log_file}" "${tail_lines}"
+        return "${rc}"
+    fi
+
+    msg "[${project}] ${task_name} completed in ${minutes}m${seconds}s"
 }
 
-export -f msg warn err die ensure_dir run_task
+export -f msg warn err die ensure_dir show_log_tail run_task
 
 check_toolchain() {
     if ! command -v "${CROSS_COMPILE}gcc" >/dev/null 2>&1; then
@@ -150,14 +185,14 @@ check_loader_build_tools() {
     local missing_tools=()
     local tool
 
-    for tool in swig; do
+    for tool in swig python3 openssl; do
         if ! command -v "${tool}" >/dev/null 2>&1; then
             missing_tools+=("${tool}")
         fi
     done
 
     if [ ${#missing_tools[@]} -ne 0 ]; then
-        die "Missing loader build tools: ${missing_tools[*]}. Please install them before running 'm loader'."
+        die "Missing loader build tools: ${missing_tools[*]}. Please install them before running 'm loader' (Ubuntu/Debian: sudo apt install swig python3 openssl)."
     fi
 }
 
@@ -182,14 +217,26 @@ check_rootfs_build_tools() {
     local missing_tools=()
     local tool
 
-    for tool in lb germinate qemu-aarch64-static wget python3 grep-aptavail; do
+    for tool in qemu-aarch64-static wget python3 grep-aptavail dpkg-scanpackages; do
         if ! command -v "${tool}" >/dev/null 2>&1; then
             missing_tools+=("${tool}")
         fi
     done
 
+    if [ "${ROOTFS_BACKEND:-live-build}" = "live-build" ]; then
+        for tool in lb germinate; do
+            if ! command -v "${tool}" >/dev/null 2>&1; then
+                missing_tools+=("${tool}")
+            fi
+        done
+    else
+        if ! command -v debootstrap >/dev/null 2>&1; then
+            missing_tools+=("debootstrap")
+        fi
+    fi
+
     if [ ${#missing_tools[@]} -ne 0 ]; then
-        die "Missing rootfs build tools: ${missing_tools[*]}. Please install the required packages before running 'm rootfs' (Ubuntu/Debian: sudo apt install live-build germinate qemu-user-static wget python3 dctrl-tools python3-yaml)."
+        die "Missing rootfs build tools: ${missing_tools[*]}. Please install the required packages before running 'm rootfs' (Ubuntu/Debian: sudo apt install live-build germinate qemu-user-static wget python3 dctrl-tools python3-yaml debootstrap dpkg-dev)."
     fi
 
     if ! python3 -c 'import yaml' >/dev/null 2>&1; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -e -o pipefail
 
 if [ -z "${TARGET_PRODUCT}" ]; then
     echo -e "\033[1;31m[ERR ]\033[0m TARGET_PRODUCT is not set." >&2
@@ -22,6 +22,7 @@ fi
 : "${KERNEL_BUILD_LOG:?KERNEL_BUILD_LOG is not set}"
 : "${KERNEL_DEB_BUILD_TARGET:?KERNEL_DEB_BUILD_TARGET is not set}"
 : "${KERNEL_DEB_PACKAGE_GLOBS:?KERNEL_DEB_PACKAGE_GLOBS is not set}"
+: "${KERNEL_IMAGE_NAME:?KERNEL_IMAGE_NAME is not set}"
 : "${KERNEL_DPKG_FLAGS:=}"
 : "${KERNEL_CLEAN_BUILD:=true}"
 : "${DEB_BUILD_OPTIONS:=nocheck}"
@@ -35,6 +36,7 @@ msg "Kernel output      : ${KERNEL_OUT}"
 msg "Kernel package out : ${KERNEL_PKG_OUT}"
 msg "Base defconfig     : ${KERNEL_BASE_DEFCONFIG}"
 msg "Build target       : ${KERNEL_DEB_BUILD_TARGET}"
+msg "Kernel image       : ${KERNEL_IMAGE_NAME}"
 msg "Clean build        : ${KERNEL_CLEAN_BUILD}"
 msg "DPKG flags         : ${KERNEL_DPKG_FLAGS:-<none>}"
 msg "Architecture       : ${ARCH}"
@@ -108,6 +110,22 @@ prepare_kernel_config() {
     cp -f "${KCONFIG_CONFIG}" "${KERNEL_OUT}/kernel.config"
 }
 
+sync_mali_csf_firmware() {
+    local fw_rel="drivers/gpu/arm/bifrost/mali_csffw.bin"
+    local fw_src="${KERNEL_SRC}/${fw_rel}"
+    local fw_dst="${KERNEL_OUT}/${fw_rel}"
+
+    if [ ! -f "${fw_src}" ]; then
+        if grep -q '^CONFIG_MALI_CSF_INCLUDE_FW=y$' "${KCONFIG_CONFIG}" 2>/dev/null; then
+            die "CONFIG_MALI_CSF_INCLUDE_FW=y but firmware is missing: ${fw_src}"
+        fi
+        return 0
+    fi
+
+    ensure_dir "$(dirname "${fw_dst}")"
+    cp -f "${fw_src}" "${fw_dst}"
+}
+
 collect_kernel_packages() {
     local search_dir
     local package
@@ -159,11 +177,13 @@ case "${KERNEL_CLEAN_BUILD}" in
 esac
 
 prepare_kernel_config
+sync_mali_csf_firmware
 
 run_task "KERNEL" "build packages" "${KERNEL_BUILD_LOG}" \
     env ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" CC="${CC}" \
     KDEB_PKGVERSION="${KDEB_PKGVERSION}" \
     KBUILD_OUTPUT="${KBUILD_OUTPUT}" KCONFIG_CONFIG="${KCONFIG_CONFIG}" \
+    KBUILD_IMAGE="arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}" \
     DPKG_FLAGS="${KERNEL_DPKG_FLAGS}" \
     DEB_BUILD_OPTIONS="${DEB_BUILD_OPTIONS}" \
     make -C "${KERNEL_SRC}" O="${KERNEL_OUT}" -j"${JOBS}" \

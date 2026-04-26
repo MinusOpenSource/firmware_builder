@@ -17,9 +17,10 @@ fi
 : "${ROOTFS_ARCH:=arm64}"
 : "${ROOTFS_BUILD_DIR:?ROOTFS_BUILD_DIR is not set}"
 : "${ROOTFS_TARBALL:?ROOTFS_TARBALL is not set}"
-: "${ROOTFS_CLEAN_BUILD:=true}"
+: "${ROOTFS_CLEAN_BUILD:=false}"
 : "${ROOTFS_PORTS_MIRROR:=http://ports.ubuntu.com/ubuntu-ports}"
 : "${ROOTFS_LOCAL_DEB_DIR:=${ROOTFS_BUILD_DIR}/local-packages}"
+: "${ROOTFS_LOCAL_REPO_DIR:=${ROOTFS_BUILD_DIR}/local-repo}"
 : "${KERNEL_PKG_OUT:?KERNEL_PKG_OUT is not set}"
 : "${KERNEL_OUT:?KERNEL_OUT is not set}"
 : "${KERNEL_DTB:?KERNEL_DTB is not set}"
@@ -64,10 +65,35 @@ rm -rf auto ubuntu-cpc
 cp -a "${LIVECD_ROOTFS_ROOT}/live-build/auto" .
 cp -a "${LIVECD_ROOTFS_ROOT}/live-build/ubuntu-cpc" .
 
+# Reused live-build workspaces may contain exported artifacts from a previous
+# run. Remove them up front so ubuntu-cpc's hard-link export step can succeed.
+rm -f livecd.ubuntu-cpc.manifest \
+      livecd.ubuntu-cpc.manifest-remove \
+      livecd.ubuntu-cpc.kernel \
+      livecd.ubuntu-cpc.initrd \
+      livecd.ubuntu-cpc.kernel-* \
+      livecd.ubuntu-cpc.initrd-*
+
 if [ "${ROOTFS_CROSS_BUILD}" = "true" ]; then
     echo -e "\033[1;32m[INFO]\033[0m Cross-arch build detected (${HOST_DPKG_ARCH} -> ${ROOTFS_ARCH}); relaxing livecd-rootfs minimize-manual check."
     sed -i 's#${LIVECD_ROOTFS_ROOT}/minimize-manual chroot#${LIVECD_ROOTFS_ROOT}/minimize-manual chroot || echo "W: minimize-manual did not converge under cross-arch build; continuing"#' auto/build
 fi
+
+if [ "${ROOTFS_TRIM_UBUNTU_CPC:-false}" = "true" ]; then
+    echo -e "\033[1;32m[INFO]\033[0m Trimming ubuntu-cpc seed selection to skip cloud-image and server layers."
+    sed -i '/add_task install minimal standard cloud-image/c\			add_task install minimal standard' auto/config
+    sed -i '/add_task install server/d' auto/config
+fi
+
+if [ "${ROOTFS_SKIP_RECOMMENDS_FIXUP:-true}" = "true" ]; then
+    echo -e "\033[1;32m[INFO]\033[0m Skipping livecd-rootfs recommends fixup pass for faster rootfs iteration."
+    sed -i '/echo "Installing any missing recommends"/,+2c\		echo "Skipping missing recommends fixup"' auto/build
+fi
+
+# ubuntu-cpc's auto/build unconditionally writes /etc/cloud/build.info for
+# non-minimized builds. After trimming cloud layers, that directory may no
+# longer exist, so create it before writing the metadata file.
+sed -i '/cat > chroot\/etc\/cloud\/build.info << EOF/i\			mkdir -p chroot/etc/cloud' auto/build
 
 # Prepare for auto config
 export LIVECD_ROOTFS_ROOT
@@ -93,7 +119,7 @@ lb config \
     --mirror-binary-security "${ROOTFS_PORTS_MIRROR}" \
     --parent-mirror-binary-security "${ROOTFS_PORTS_MIRROR}" \
     --keyring-packages ubuntu-keyring \
-    --linux-packages none \
+    --linux-packages linux-image \
     --binary-images none \
     --bootappend-live ""
 
@@ -114,6 +140,16 @@ if [ -n "${ROOTFS_PACKAGE_LIST:-}" ]; then
     done
 fi
 
+if [ -z "${ROOTFS_LOCAL_PACKAGES:-}" ]; then
+    ROOTFS_LOCAL_PACKAGES="platform-kubuntu platform-board-firmware"
+elif ! printf ' %s ' "${ROOTFS_LOCAL_PACKAGES}" | grep -q ' platform-kubuntu '; then
+    ROOTFS_LOCAL_PACKAGES="${ROOTFS_LOCAL_PACKAGES} platform-kubuntu"
+fi
+
+if ! printf ' %s ' "${ROOTFS_LOCAL_PACKAGES}" | grep -q ' platform-board-firmware '; then
+    ROOTFS_LOCAL_PACKAGES="${ROOTFS_LOCAL_PACKAGES} platform-board-firmware"
+fi
+
 # Build and inject local custom DEB packages
 if [ -n "${ROOTFS_LOCAL_PACKAGES:-}" ]; then
     echo -e "\033[1;32m[INFO]\033[0m Building local packages: ${ROOTFS_LOCAL_PACKAGES}..."
@@ -121,11 +157,25 @@ if [ -n "${ROOTFS_LOCAL_PACKAGES:-}" ]; then
         "${ROOTFS_LOCAL_DEB_DIR}" ${ROOTFS_LOCAL_PACKAGES}
 fi
 
+rm -f config/archives/firmware-builder-local.list.chroot
+
 echo -e "\033[1;32m[INFO]\033[0m Injecting local deb packages..."
 mkdir -p config/includes.chroot/opt/firmware-builder/packages
+rm -rf config/includes.chroot/opt/firmware-builder/packages/*
 if compgen -G "${ROOTFS_LOCAL_DEB_DIR}/*.deb" > /dev/null; then
     cp -f "${ROOTFS_LOCAL_DEB_DIR}"/*.deb config/includes.chroot/opt/firmware-builder/packages/
 fi
+
+# Reused live-build workspaces keep stage stamps under .build/. Since our local
+# packages and package lists may change, drop the related stamps so install
+# stages are re-executed on incremental builds.
+rm -f .build/chroot_package-lists.install \
+      .build/chroot_install-packages.install \
+      .build/chroot_package-lists.live \
+      .build/chroot_install-packages.live \
+      .build/chroot_includes \
+      .build/chroot_hooks \
+      .build/chroot_hacks
 
 # Configure Hook
 mkdir -p config/hooks
@@ -208,7 +258,9 @@ chroot chroot /usr/bin/env -i \
 echo "exit 101" > /usr/sbin/policy-rc.d; chmod +x /usr/sbin/policy-rc.d
 apt-get purge -y "^linux-image-.*" "^linux-modules-.*" || true
 apt-get purge -y "^grub-.*" || true
+apt-get purge -y cloud-init cloud-guest-utils || true
 apt-get autoremove -y --purge || true
+rm -rf /etc/cloud /var/lib/cloud
 rm -rf /boot/grub
 apt-get clean
 rm -f /usr/sbin/policy-rc.d

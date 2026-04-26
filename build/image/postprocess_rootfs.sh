@@ -47,17 +47,23 @@ postprocess_resolve_kernel_deb() {
 resolve_board_boot_artifacts() {
     : "${KERNEL_PKG_OUT:?KERNEL_PKG_OUT is not set}"
     : "${KERNEL_DTB:?KERNEL_DTB is not set}"
+    : "${KERNEL_IMAGE_NAME:?KERNEL_IMAGE_NAME is not set}"
+    : "${KERNEL_OUT:?KERNEL_OUT is not set}"
 
     KERNEL_IMAGE_DEB="$(postprocess_resolve_kernel_deb)" || return 1
     KERNEL_IMAGE_DEB_NAME="$(basename "${KERNEL_IMAGE_DEB}")"
     KERNEL_PACKAGE_NAME="$(dpkg-deb -f "${KERNEL_IMAGE_DEB}" Package)"
     CUSTOM_KERNEL_VERSION="${KERNEL_PACKAGE_NAME#linux-image-}"
+    CUSTOM_KERNEL_IMAGE_SRC="${KERNEL_OUT}/arch/${ARCH}/boot/${KERNEL_IMAGE_NAME}"
+    CUSTOM_KERNEL_IMAGE_DST="/boot/vmlinuz-${CUSTOM_KERNEL_VERSION}"
     CUSTOM_KERNEL_DTB_SRC="/usr/lib/linux-image-${CUSTOM_KERNEL_VERSION}/${KERNEL_DTB}"
-    CUSTOM_KERNEL_DTB_DST="/boot/dtb-${CUSTOM_KERNEL_VERSION}"
+    CUSTOM_KERNEL_DTB_DST="/boot/dtb-${CUSTOM_KERNEL_VERSION}/${KERNEL_DTB}"
 
     export KERNEL_IMAGE_DEB
     export KERNEL_IMAGE_DEB_NAME
     export CUSTOM_KERNEL_VERSION
+    export CUSTOM_KERNEL_IMAGE_SRC
+    export CUSTOM_KERNEL_IMAGE_DST
     export CUSTOM_KERNEL_DTB_SRC
     export CUSTOM_KERNEL_DTB_DST
 }
@@ -136,19 +142,33 @@ apply_board_rootfs_customizations() {
     postprocess_require_command mount util-linux || return 1
 
     echo " -> Using kernel package: ${KERNEL_IMAGE_DEB_NAME}"
+    echo " -> Kernel image source: ${KERNEL_IMAGE_NAME}"
     echo " -> Board DTB: ${KERNEL_DTB}"
     echo " -> Kernel version: ${CUSTOM_KERNEL_VERSION}"
 
     postprocess_cleanup_existing_kernel_files "${rootfs_dir}"
     postprocess_update_fstab "${rootfs_dir}" "${root_uuid}"
+    [ -f "${CUSTOM_KERNEL_IMAGE_SRC}" ] || {
+        echo -e "\033[1;31m[ERR ]\033[0m Missing raw kernel image: ${CUSTOM_KERNEL_IMAGE_SRC}" >&2
+        return 1
+    }
 
     qemu_host="$(command -v qemu-aarch64-static)"
     qemu_target="${rootfs_dir}/usr/bin/qemu-aarch64-static"
     cmdline="$(postprocess_strip_root_arg "${KERNEL_CMDLINE}")"
 
     mkdir -p "${rootfs_dir}/tmp" "${rootfs_dir}/usr/bin"
+    install -m 0644 "${CUSTOM_KERNEL_IMAGE_SRC}" "${rootfs_dir}/tmp/${KERNEL_IMAGE_NAME}"
     install -m 0755 "${qemu_host}" "${qemu_target}"
     install -m 0644 "${KERNEL_IMAGE_DEB}" "${rootfs_dir}/tmp/${KERNEL_IMAGE_DEB_NAME}"
+
+    if [ ! -e "${rootfs_dir}/usr/bin/sync" ]; then
+        if [ -x "${rootfs_dir}/usr/bin/gnusync" ]; then
+            ln -sf gnusync "${rootfs_dir}/usr/bin/sync"
+        elif [ -x "${rootfs_dir}/usr/lib/cargo/bin/coreutils/sync" ]; then
+            ln -sf ../lib/cargo/bin/coreutils/sync "${rootfs_dir}/usr/bin/sync"
+        fi
+    fi
 
     postprocess_mount_chroot_env "${rootfs_dir}"
 
@@ -156,6 +176,13 @@ apply_board_rootfs_customizations() {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 dpkg -i /tmp/${KERNEL_IMAGE_DEB_NAME}
+test -f '${CUSTOM_KERNEL_DTB_SRC}' || {
+    echo 'Missing packaged DTB after kernel install: ${CUSTOM_KERNEL_DTB_SRC}' >&2
+    exit 1
+}
+install -m 0644 '/tmp/${KERNEL_IMAGE_NAME}' '${CUSTOM_KERNEL_IMAGE_DST}'
+ln -sf 'vmlinuz-${CUSTOM_KERNEL_VERSION}' /boot/vmlinuz
+mkdir -p \"\$(dirname '${CUSTOM_KERNEL_DTB_DST}')\"
 install -m 0644 '${CUSTOM_KERNEL_DTB_SRC}' '${CUSTOM_KERNEL_DTB_DST}'
 cat > /etc/kernel/cmdline <<'EOF'
 root=UUID=${root_uuid} ${cmdline}
@@ -174,7 +201,7 @@ u-boot-update
         rc=$?
     fi
 
-    rm -f "${rootfs_dir}/tmp/${KERNEL_IMAGE_DEB_NAME}" "${qemu_target}"
+    rm -f "${rootfs_dir}/tmp/${KERNEL_IMAGE_NAME}" "${rootfs_dir}/tmp/${KERNEL_IMAGE_DEB_NAME}" "${qemu_target}"
     postprocess_unmount_chroot_env "${rootfs_dir}"
 
     if [ "${rc}" -ne 0 ]; then
